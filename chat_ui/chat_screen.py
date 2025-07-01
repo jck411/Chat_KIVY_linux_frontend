@@ -20,7 +20,8 @@ from chat_ui.services.message_service import (
     MessageRateLimitError, MessageFormatError, MessageServiceError
 )
 from chat_ui.theme import Colors, Layout, Sizes, Spacing
-from chat_ui.websocket_client import ChatWebSocketClient, ConnectionState
+from chat_ui.websocket.client import WebSocketClient
+from chat_ui.websocket.connection_manager import ConnectionState
 
 # Set up structured logger for this module
 logger = get_logger(__name__)
@@ -44,7 +45,7 @@ class ModernChatScreen(MDScreen):
                    scroll_throttle_ms=Config.SCROLL_THROTTLE_MS,
                    text_batch_ms=Config.TEXT_BATCH_MS)
 
-        self.client = ChatWebSocketClient()
+        self.client = WebSocketClient()
         self.backend_available = False
         self.scroll_view = None
         self.connection_monitor_task = None
