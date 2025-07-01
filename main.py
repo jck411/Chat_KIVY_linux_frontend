@@ -77,7 +77,7 @@ def configure_kivy():
 configure_logging()
 configure_kivy()
 
-from chat_ui.modern_chat import ModernChatScreen
+from chat_ui.chat_screen import ModernChatScreen
 
 # Additional Kivy logger configuration after imports
 from kivy import Logger as KivyLogger
