@@ -60,6 +60,7 @@ class ChatWebSocketClient:
         self._last_ping_time = 0
         self._ping_interval = Config.PING_INTERVAL
         self._health_check_task = None
+        self._stop_health_monitor = False  # Flag to stop health monitor
 
         # Message handling
         self._message_handlers = {}  # message_id -> (on_chunk, on_complete)
@@ -322,7 +323,7 @@ class ChatWebSocketClient:
 
     async def _health_monitor(self) -> None:
         """Monitor connection health and send periodic pings."""
-        while True:
+        while not self._stop_health_monitor:
             try:
                 await asyncio.sleep(self._ping_interval)
 
@@ -340,8 +341,6 @@ class ChatWebSocketClient:
                         try:
                             ping_data = {"type": "ping", "timestamp": current_time}
                             await self._websocket.send(json.dumps(ping_data))
-                            # Only log health checks in debug mode, not for production
-                            # logger.debug("💓 Health check ping sent")
                         except Exception as e:
                             logger.warning(f"Health check failed: {e}")
                             await self._schedule_reconnect()
@@ -361,11 +360,21 @@ class ChatWebSocketClient:
         """Clean shutdown of WebSocket client."""
         logger.info("🔄 Closing WebSocket client")
 
+        self._stop_health_monitor = True  # Signal health monitor to stop
+        
         if self._health_check_task:
             self._health_check_task.cancel()
+            try:
+                await self._health_check_task
+            except asyncio.CancelledError:
+                pass
 
         if self._reconnect_task:
             self._reconnect_task.cancel()
+            try:
+                await self._reconnect_task
+            except asyncio.CancelledError:
+                pass
 
         if self._websocket and not self._is_connection_closed():
             await self._websocket.close()

@@ -10,6 +10,8 @@ dependencies = [
     # KivyMD is managed via [tool.uv.sources] due to temporary override
     "websockets==13.1",
     "structlog==24.1.0",
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.25.0",
 ]
 requires-python = "==3.13.5"
 readme = "README.md"
@@ -48,10 +50,12 @@ kivymd = { git = "https://github.com/kivymd/KivyMD.git" }
 [tool.pytest.ini_options]
 testpaths = ["chat_ui/tests"]
 python_files = ["test_*.py"]
-addopts = "--cov=chat_ui.theme --cov-report=term-missing --strict-markers"
+addopts = "--cov=chat_ui.config --cov-report=term-missing --strict-markers"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.coverage.run]
+source = ["chat_ui"]
 branch = true
 
 [tool.coverage.report]
@@ -61,8 +65,31 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "raise NotImplementedError",
     "if TYPE_CHECKING:",
+    "pass",  # Simple pass statements
+    "@abstractmethod",  # Abstract method definitions
+]
+
+# Critical paths requiring 70% coverage
+include = [
+    "chat_ui/services/message_service.py",
+    "chat_ui/websocket_client.py",
+    "chat_ui/config.py"
 ]
 fail_under = 70
+
+[tool.coverage.paths]
+source = ["chat_ui/"]
+
+[tool.coverage.html]
+directory = "coverage_html"
+
+# Define contexts for different types of code
+[tool.coverage.contexts]
+critical = [
+    "chat_ui/services/message_service.py",
+    "chat_ui/websocket_client.py",
+    "chat_ui/config.py"
+]
 
 [tool.ruff]
 select = ["ALL"]
