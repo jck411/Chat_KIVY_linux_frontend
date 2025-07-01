@@ -7,58 +7,20 @@ from kivy.metrics import dp
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.button import MDFabButton
 from kivymd.uix.card import MDCard
-from kivymd.uix.label import MDLabel
 from kivymd.uix.screen import MDScreen
 from kivymd.uix.scrollview import MDScrollView
 from kivymd.uix.textfield import MDTextField
 
+from chat_ui.components.chat_header import ChatHeader
+from chat_ui.components.message_bubble import MessageBubble
 from chat_ui.config import Config, Messages
 from chat_ui.logging_config import get_logger
+from chat_ui.services.message_service import MessageService
 from chat_ui.theme import Colors, Layout, Sizes, Spacing
 from chat_ui.websocket_client import ChatWebSocketClient, ConnectionState
 
 # Set up structured logger for this module
 logger = get_logger(__name__)
-
-
-class ModernBubble(MDCard):
-    """Chat message bubble with optimized styling."""
-
-    def __init__(self, text, is_user=False, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.elevation = 0 if is_user else 1
-        self.radius = [Sizes.BUBBLE_RADIUS]
-        self.size_hint_y = None
-        self.adaptive_height = True
-        self.padding = [Spacing.MEDIUM, Spacing.SMALL]
-
-        if is_user:
-            self.theme_bg_color = "Custom"  # Required for KivyMD 2.0+
-            self.md_bg_color = Colors.PRIMARY_BLUE
-            self.pos_hint = Layout.USER_BUBBLE_POS
-            self.size_hint_x = Layout.USER_BUBBLE_WIDTH
-            text_color = Colors.TEXT_LIGHT
-        else:
-            self.theme_bg_color = "Custom"  # Required for KivyMD 2.0+
-            self.md_bg_color = Colors.LIGHT_GRAY
-            self.pos_hint = Layout.AI_BUBBLE_POS
-            self.size_hint_x = Layout.AI_BUBBLE_WIDTH
-            text_color = Colors.TEXT_DARK
-
-        self.label = MDLabel(
-            text=text,
-            theme_text_color="Custom",
-            text_color=text_color,
-            font_size=Sizes.MESSAGE_FONT,
-            adaptive_height=True,
-            text_size=(dp(300), None),
-            markup=True,
-        )
-        self.add_widget(self.label)
-
-    def update_text(self, text) -> None:
-        """Update bubble text content."""
-        self.label.text = text
 
 
 class ModernChatScreen(MDScreen):
@@ -80,27 +42,35 @@ class ModernChatScreen(MDScreen):
                    text_batch_ms=Config.TEXT_BATCH_MS)
 
         self.client = ChatWebSocketClient()
-        self.current_bubble = None
         self.backend_available = False
         self.scroll_view = None
         self.connection_monitor_task = None
 
-        # Performance optimization variables
+        # Header component (replaces direct status_label access)
+        self.header = None
+
+        # Message service (handles all message operations)
+        self.message_service = MessageService(self.client)
+
+        # Performance optimization variables for scrolling
         self._scroll_scheduled = False
         self._pending_scroll_event = None
         self._last_scroll_time = 0
         self._scroll_throttle_delay = Config.SCROLL_THROTTLE_MS / 1000.0
 
-        # Text batching for streaming optimization
-        self._pending_chunks = []
-        self._text_update_scheduled = False
-        self._text_batch_delay = Config.TEXT_BATCH_MS / 1000.0
-
-        # Memory management
-        self.max_messages = Config.MAX_MESSAGE_HISTORY
-
         self._setup_ui()
+        self._setup_message_service()
         self._initialize_connection_monitoring()
+
+    def _setup_message_service(self) -> None:
+        """Setup message service with UI callbacks."""
+        self.message_service.set_ui_callbacks(
+            on_bubble_created=self._create_message_bubble,
+            on_bubble_updated=None,  # Not needed - bubbles handle text updates directly
+            on_focus_input=self._focus_input,
+            on_scroll_bottom=self._scroll_to_bottom,
+            on_cleanup_messages=self._cleanup_old_messages
+        )
 
     def _initialize_connection_monitoring(self) -> None:
         """Initialize connection testing and monitoring."""
@@ -117,8 +87,8 @@ class ModernChatScreen(MDScreen):
             md_bg_color=Colors.BACKGROUND,
         )
 
-        # Header with status
-        header = self._create_header()
+        # Header component (new approach)
+        self.header = ChatHeader()
 
         # Messages container with scrolling
         self.messages = MDBoxLayout(
@@ -140,11 +110,11 @@ class ModernChatScreen(MDScreen):
         input_card = self._create_input_area()
 
         # Add welcome message
-        welcome = ModernBubble(Config.WELCOME_MESSAGE)
+        welcome = MessageBubble(Config.WELCOME_MESSAGE)
         self.messages.add_widget(welcome)
 
         # Assemble layout
-        layout.add_widget(header)
+        layout.add_widget(self.header)
         layout.add_widget(self.scroll_view)
         layout.add_widget(input_card)
         self.add_widget(layout)
@@ -152,59 +122,7 @@ class ModernChatScreen(MDScreen):
         # Initial scroll to bottom
         Clock.schedule_once(lambda dt: self._scroll_to_bottom(force=True), 0.01)
 
-    def _create_header(self):
-        """Create the header with avatar and status."""
-        header = MDCard(
-            theme_bg_color="Custom",  # Required for KivyMD 2.0+
-            md_bg_color=Colors.WHITE,
-            elevation=2,
-            radius=[0],
-            size_hint_y=None,
-            height=Sizes.HEADER_HEIGHT,
-            padding=Spacing.MEDIUM,
-        )
 
-        header_content = MDBoxLayout(
-            orientation="horizontal",
-            spacing=Spacing.SMALL,
-        )
-
-        # Avatar
-        avatar = MDCard(
-            theme_bg_color="Custom",  # Required for KivyMD 2.0+
-            md_bg_color=Colors.PRIMARY_BLUE,
-            size_hint=(None, None),
-            size=(Sizes.AVATAR_SIZE, Sizes.AVATAR_SIZE),
-            radius=[Sizes.BUBBLE_RADIUS],
-        )
-
-        # Title and status
-        title_box = MDBoxLayout(orientation="vertical")
-
-        title = MDLabel(
-            text=Config.AI_NAME,
-            font_size=Sizes.TITLE_FONT,
-            bold=True,
-            size_hint_y=None,
-            height=dp(24),
-        )
-
-        self.status_label = MDLabel(
-            text=Messages.CONNECTING,
-            font_size=Sizes.STATUS_FONT,
-            theme_text_color="Custom",
-            text_color=Colors.TEXT_MUTED,
-            size_hint_y=None,
-            height=dp(18),
-        )
-
-        title_box.add_widget(title)
-        title_box.add_widget(self.status_label)
-        header_content.add_widget(avatar)
-        header_content.add_widget(title_box)
-        header.add_widget(header_content)
-
-        return header
 
     def _create_input_area(self):
         """Create the input area with text field and send button."""
@@ -293,10 +211,10 @@ class ModernChatScreen(MDScreen):
 
             status_text = Messages.ONLINE if connected else Messages.DEMO_MODE
             logger.info("backend_connection_test", connected=connected, status=status_text)
-            Clock.schedule_once(lambda dt: setattr(self.status_label, "text", status_text))
+            Clock.schedule_once(lambda dt: self.header.update_status(status_text))
         except Exception as e:
             logger.warning("backend_connection_test_failed", error=str(e))
-            Clock.schedule_once(lambda dt: setattr(self.status_label, "text", Messages.DEMO_MODE))
+            Clock.schedule_once(lambda dt: self.header.update_status(Messages.DEMO_MODE))
 
     def _monitor_connection_state(self, dt) -> None:
         """Monitor and update UI based on connection state."""
@@ -306,135 +224,65 @@ class ModernChatScreen(MDScreen):
             if state == ConnectionState.CONNECTED:
                 if not self.backend_available:
                     self.backend_available = True
-                    self.status_label.text = Messages.ONLINE
+                    self.header.update_status(Messages.ONLINE)
                     logger.info("connection_state_changed", state="connected", backend_available=True)
             elif state == ConnectionState.CONNECTING:
-                self.status_label.text = Messages.CONNECTING
+                self.header.update_status(Messages.CONNECTING)
                 logger.info("connection_state_changed", state="connecting")
             elif state == ConnectionState.RECONNECTING:
-                self.status_label.text = Messages.RECONNECTING
+                self.header.update_status(Messages.RECONNECTING)
                 logger.info("connection_state_changed", state="reconnecting")
             elif state == ConnectionState.FAILED:
                 self.backend_available = False
-                self.status_label.text = Messages.CONNECTION_FAILED
+                self.header.update_status(Messages.CONNECTION_FAILED)
                 logger.warning("connection_state_changed",
                                state="failed", backend_available=False)
             elif state == ConnectionState.DISCONNECTED:
                 self.backend_available = False
-                self.status_label.text = Messages.DEMO_MODE
+                self.header.update_status(Messages.DEMO_MODE)
                 logger.info("connection_state_changed", state="disconnected", mode="demo")
 
         except Exception as e:
             # Fallback to demo mode
             logger.exception("connection_monitoring_error", error=str(e))
             self.backend_available = False
-            self.status_label.text = Messages.DEMO_MODE
+            self.header.update_status(Messages.DEMO_MODE)
 
     def send_message(self, instance) -> None:
-        """Handle message sending with backend or demo mode."""
+        """Handle message sending - now delegates to MessageService."""
         text = self.text_input.text.strip()
         if not text:
             return
 
-        logger.info("sending_message",
-                   message_length=len(text),
-                   backend_available=self.backend_available,
-                   total_messages=len(self.messages.children))
-
-        # Add user message
-        user_bubble = ModernBubble(text, is_user=True)
+        # Add user message bubble
+        user_bubble = MessageBubble(text, is_user=True)
         self.messages.add_widget(user_bubble)
         self.text_input.text = ""
-        self._cleanup_old_messages()
-        self._scroll_to_bottom(force=True)
 
-        # Reset current bubble for new response
-        self.current_bubble = None
+        # Reset message service state
+        self.message_service.reset_current_bubble()
 
-        if self.backend_available:
-            self._send_to_backend(text)
-        else:
-            self._show_demo_response(text)
+        # Delegate to message service
+        self.message_service.send_message(
+            text=text,
+            backend_available=self.backend_available,
+            total_messages=len(self.messages.children)
+        )
 
-    def _send_to_backend(self, message) -> None:
-        """Send message to backend in background thread."""
-        thread = threading.Thread(target=self._threaded_send, args=(message,), daemon=True)
-        thread.start()
-
-    def _show_demo_response(self, message) -> None:
-        """Show demo response when backend is unavailable."""
-        logger.info("showing_demo_response", original_message_length=len(message))
-        demo_bubble = ModernBubble(Messages.DEMO_RESPONSE.format(message=message))
-        self.messages.add_widget(demo_bubble)
-        self._scroll_to_bottom(force=True)
-        Clock.schedule_once(lambda dt: self._focus_input(), 0.5)
-
-    def _threaded_send(self, message) -> None:
-        """Send message to backend with error handling."""
-        start_time = time.time()
-        try:
-            logger.info("sending_to_backend", message_length=len(message))
-            self.client.send_message_sync(message, self._on_chunk, self._on_message_complete)
-            elapsed_ms = (time.time() - start_time) * 1000
-            logger.info("backend_send_completed", elapsed_ms=elapsed_ms)
-        except Exception as e:
-            elapsed_ms = (time.time() - start_time) * 1000
-            error_msg = self._format_error_message(str(e))
-            logger.exception("backend_send_failed", error=str(e), elapsed_ms=elapsed_ms)
-            Clock.schedule_once(lambda dt: self._show_error_message(error_msg))
-
-    def _show_error_message(self, error_msg) -> None:
-        """Show error message on main thread."""
-        try:
-            logger.warning("displaying_error_message", error=error_msg)
-            error_bubble = ModernBubble(f"❌ {error_msg}")
-            self.messages.add_widget(error_bubble)
-            self._scroll_to_bottom(force=True)
-            self._focus_input()
-        except Exception as e:
-            # Fallback to status update
-            logger.exception("error_display_failed", error=str(e), original_error=error_msg)
-            self.status_label.text = f"❌ {error_msg[:30]}..."
-
-    def _format_error_message(self, error: str) -> str:
-        """Format error messages to be user-friendly."""
-        error_lower = error.lower()
-        if "timeout" in error_lower:
-            return Messages.TIMEOUT
-        elif "connection refused" in error_lower:
-            return Messages.CONNECTION_REFUSED
-        elif "failed after" in error_lower:
-            return Messages.MAX_RETRIES
-        else:
-            return Messages.UNKNOWN_ERROR.format(error=error)
-
-    def _on_chunk(self, chunk) -> None:
-        """Handle incoming chunk with batching for better performance."""
-        self._pending_chunks.append(chunk)
-
-        if not self._text_update_scheduled:
-            self._text_update_scheduled = True
-            Clock.schedule_once(self._process_batched_chunks, self._text_batch_delay)
-
-    def _process_batched_chunks(self, dt) -> None:
-        """Process all pending chunks in a single UI update."""
-        if self._pending_chunks:
-            combined_text = "".join(self._pending_chunks)
-            self._pending_chunks.clear()
-            self._append_chunk_batch(combined_text)
-
-        self._text_update_scheduled = False
-
-    def _on_message_complete(self) -> None:
-        """Called when the assistant finishes responding."""
-        # Process any remaining chunks immediately
-        if self._pending_chunks:
-            combined_text = "".join(self._pending_chunks)
-            self._pending_chunks.clear()
-            self._append_chunk_batch(combined_text)
-            self._text_update_scheduled = False
-
-        Clock.schedule_once(lambda dt: self._focus_input())
+    # UI Callback methods for MessageService
+    def _create_message_bubble(self, text: str, is_user: bool = False) -> MessageBubble:
+        """Create and add a message bubble to the UI.
+        
+        Args:
+            text: Message text
+            is_user: Whether this is a user message
+            
+        Returns:
+            Created bubble widget
+        """
+        bubble = MessageBubble(text, is_user=is_user)
+        self.messages.add_widget(bubble)
+        return bubble
 
     def _focus_input(self) -> None:
         """Focus the text input field."""
@@ -442,25 +290,9 @@ class ModernChatScreen(MDScreen):
 
     def _cleanup_old_messages(self) -> None:
         """Remove old messages to prevent memory bloat during long conversations."""
-        if len(self.messages.children) > self.max_messages:
-            messages_to_remove = len(self.messages.children) - self.max_messages
-            logger.info("cleaning_up_old_messages",
-                       total_messages=len(self.messages.children),
-                       removing_count=messages_to_remove,
-                       max_allowed=self.max_messages)
-            for _ in range(messages_to_remove):
-                oldest_message = self.messages.children[-1]
-                self.messages.remove_widget(oldest_message)
+        messages_to_remove = self.message_service.cleanup_old_messages(len(self.messages.children))
+        for _ in range(messages_to_remove):
+            oldest_message = self.messages.children[-1]
+            self.messages.remove_widget(oldest_message)
 
-    def _append_chunk_batch(self, text) -> None:
-        """Append batched text to the current bubble with optimized scrolling."""
-        # Create bubble on first chunk
-        if not self.current_bubble:
-            self.current_bubble = ModernBubble(text)
-            self.messages.add_widget(self.current_bubble)
-            self._scroll_to_bottom(force=True)
-        else:
-            # Append to existing bubble
-            current_text = self.current_bubble.label.text
-            self.current_bubble.update_text(current_text + text)
-            self._scroll_to_bottom()
+
