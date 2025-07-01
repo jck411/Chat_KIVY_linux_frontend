@@ -1,6 +1,6 @@
-# 💬 KivyMD Chat UI
+# 💬 Chat_KIVY_linux_frontend
 
-A modern, production-ready chat interface built with KivyMD and Material Design 3. Features real-time WebSocket communication, streaming responses, and optimized performance for both development and production environments.
+A modern, production-ready chat interface built with Kivy, optimized for Linux environments. Features real-time WebSocket communication, streaming responses, and optimized performance for both development and production environments.
 
 ## 🌟 Current Features
 
@@ -81,7 +81,7 @@ sudo apt-get install xclip xsel  # Linux only
 ```bash
 # Clone and install dependencies
 git clone <your-repo>
-cd KIVY_FRONTEND
+cd Chat_KIVY_linux_frontend
 uv sync
 ```
 

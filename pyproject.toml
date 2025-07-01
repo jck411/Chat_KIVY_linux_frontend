@@ -1,7 +1,7 @@
 [project]
-name = "kivymd-chat-ui"
+name = "chat-kivy-linux-frontend"
 version = "0.1.0"
-description = "Modern KivyMD Chat UI Frontend"
+description = "Modern Kivy Chat Frontend for Linux"
 authors = [
     {name = "Chat UI Team", email = "team@chatui.com"}
 ]
