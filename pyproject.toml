@@ -7,7 +7,7 @@ authors = [
 ]
 dependencies = [
     "kivy==2.3.1",
-    "kivymd==1.2.0",
+    # KivyMD is managed via [tool.uv.sources] due to temporary override
     "websockets==13.1",
     "structlog==24.1.0",
 ]
@@ -70,7 +70,7 @@ ignore = ["D100", "D101", "D102", "D103"]  # Ignore docstring rules for test cod
 line-length = 100
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13.5"
 strict = true
 ignore_missing_imports = true
 disallow_untyped_defs = true
