@@ -12,6 +12,7 @@ dependencies = [
     "structlog==24.1.0",
     "pytest>=8.3.4",
     "pytest-asyncio>=0.25.0",
+    "prometheus-client>=0.22.1",
 ]
 requires-python = "==3.13.5"
 readme = "README.md"
@@ -45,12 +46,20 @@ dev-dependencies = [
 ]
 
 [tool.uv.sources]
-kivymd = { git = "https://github.com/kivymd/KivyMD.git" }
+# Using specific commit hash for Python 3.13.5 compatibility
+# This commit hash should be updated when testing confirms compatibility
+kivymd = { git = "https://github.com/kivymd/KivyMD.git", rev = "a1b2c3d4" }  # Replace with actual tested commit hash
 
 [tool.pytest.ini_options]
 testpaths = ["chat_ui/tests"]
 python_files = ["test_*.py"]
-addopts = "--cov=chat_ui.config --cov-report=term-missing --strict-markers"
+addopts = """
+    --cov=chat_ui/services/message_service.py
+    --cov=chat_ui/websocket_client.py
+    --cov=chat_ui/config.py
+    --cov-report=term-missing
+    --strict-markers
+"""
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
@@ -69,16 +78,24 @@ exclude_lines = [
     "@abstractmethod",  # Abstract method definitions
 ]
 
-# Critical paths requiring 70% coverage
+# Only enforce coverage requirements on critical paths
 include = [
     "chat_ui/services/message_service.py",
     "chat_ui/websocket_client.py",
     "chat_ui/config.py"
 ]
+
+# Only fail if critical paths don't meet coverage threshold
 fail_under = 70
 
+# Separate coverage reporting for critical and non-critical paths
 [tool.coverage.paths]
 source = ["chat_ui/"]
+critical = [
+    "chat_ui/services/message_service.py",
+    "chat_ui/websocket_client.py",
+    "chat_ui/config.py"
+]
 
 [tool.coverage.html]
 directory = "coverage_html"

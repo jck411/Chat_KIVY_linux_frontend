@@ -8,6 +8,16 @@ import time
 from typing import Any, Dict
 
 import structlog
+from prometheus_client import Counter, Histogram, start_http_server
+
+# Prometheus metrics
+message_counter = Counter('chat_messages_total', 'Total messages processed')
+message_latency = Histogram('message_processing_seconds', 'Message processing time')
+error_counter = Counter('chat_errors_total', 'Total errors encountered')
+websocket_state = Counter('websocket_state_changes', 'WebSocket connection state changes')
+
+# Start metrics server on port 8000
+start_http_server(8000)
 
 # Configure standard logging to work with structlog
 logging.basicConfig(
@@ -19,6 +29,8 @@ logging.basicConfig(
 def add_timestamp(_, __, event_dict: Dict[str, Any]) -> Dict[str, Any]:
     """Add ISO timestamp and elapsed time to log events."""
     event_dict["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    # Add elapsed_ms since process start
+    event_dict["elapsed_ms"] = int((time.time() - _process_start) * 1000)
     return event_dict
 
 def add_module_context(logger: str, method_name: str, event_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -26,6 +38,9 @@ def add_module_context(logger: str, method_name: str, event_dict: Dict[str, Any]
     event_dict["module"] = logger
     event_dict["function"] = method_name
     return event_dict
+
+# Store process start time for elapsed_ms calculation
+_process_start = time.time()
 
 # Configure structlog as the primary logging system
 structlog.configure(

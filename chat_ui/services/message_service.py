@@ -11,12 +11,26 @@ from typing import Callable, Optional
 from kivy.clock import Clock
 
 from chat_ui.config import Config, Messages
-from chat_ui.logging_config import get_logger
+from chat_ui.logging_config import get_logger, message_counter, message_latency, error_counter
 from chat_ui.websocket_client import ChatWebSocketClient
 
 # Set up structured logger for this module
 logger = get_logger(__name__)
 
+class MessageError(Exception):
+    """Base class for message service errors."""
+
+class MessageTooLongError(MessageError):
+    """Message exceeds maximum allowed length."""
+
+class MessageRateLimitError(MessageError):
+    """Too many messages sent in a short time period."""
+
+class MessageFormatError(MessageError):
+    """Message format is invalid."""
+
+class MessageServiceError(MessageError):
+    """General message service error."""
 
 class MessageService:
     """Service class that handles all message operations.
@@ -29,6 +43,12 @@ class MessageService:
     - Message history management
     - Performance optimization with text batching
     """
+
+    # Constants for validation
+    MAX_MESSAGE_LENGTH = 4000  # Maximum characters per message
+    MIN_MESSAGE_LENGTH = 1     # Minimum characters per message
+    RATE_LIMIT_MESSAGES = 10   # Maximum messages per minute
+    RATE_LIMIT_WINDOW = 60     # Rate limit window in seconds
 
     def __init__(self, websocket_client: ChatWebSocketClient) -> None:
         """Initialize the message service.
@@ -50,6 +70,9 @@ class MessageService:
         
         # Memory management
         self.max_messages = Config.MAX_MESSAGE_HISTORY
+        
+        # Rate limiting
+        self._message_timestamps = []
         
         # Callbacks (set by UI components)
         self._on_bubble_created = None
@@ -79,6 +102,42 @@ class MessageService:
         self._on_scroll_bottom = on_scroll_bottom
         self._on_cleanup_messages = on_cleanup_messages
 
+    def _validate_message(self, text: str) -> None:
+        """Validate message before sending.
+        
+        Args:
+            text: Message text to validate
+            
+        Raises:
+            MessageTooLongError: If message exceeds length limit
+            MessageFormatError: If message format is invalid
+            MessageRateLimitError: If rate limit exceeded
+        """
+        # Check message length
+        if len(text) > self.MAX_MESSAGE_LENGTH:
+            error_counter.inc()
+            msg = f"Message too long ({len(text)} chars). Maximum is {self.MAX_MESSAGE_LENGTH}."
+            raise MessageTooLongError(msg)
+            
+        if len(text.strip()) < self.MIN_MESSAGE_LENGTH:
+            error_counter.inc()
+            msg = "Message cannot be empty."
+            raise MessageFormatError(msg)
+            
+        # Check rate limiting
+        current_time = time.time()
+        self._message_timestamps = [
+            ts for ts in self._message_timestamps 
+            if current_time - ts < self.RATE_LIMIT_WINDOW
+        ]
+        
+        if len(self._message_timestamps) >= self.RATE_LIMIT_MESSAGES:
+            error_counter.inc()
+            msg = f"Rate limit exceeded. Maximum {self.RATE_LIMIT_MESSAGES} messages per {self.RATE_LIMIT_WINDOW} seconds."
+            raise MessageRateLimitError(msg)
+            
+        self._message_timestamps.append(current_time)
+
     def send_message(self, text: str, backend_available: bool, total_messages: int) -> None:
         """Handle message sending with backend or demo mode.
         
@@ -87,29 +146,48 @@ class MessageService:
             backend_available: Whether backend connection is available
             total_messages: Current total number of messages (for logging)
         """
-        if not text.strip():
+        if not text:
             return
 
-        logger.info("sending_message",
-                   message_length=len(text),
-                   backend_available=backend_available,
-                   total_messages=total_messages)
+        # Track message metrics
+        message_counter.inc()
+        start_time = time.time()
 
-        # Cleanup old messages if needed
-        if self._on_cleanup_messages:
-            self._on_cleanup_messages()
+        try:
+            # Validate message
+            self._validate_message(text)
 
-        # Scroll to bottom
-        if self._on_scroll_bottom:
-            self._on_scroll_bottom(force=True)
+            logger.info("sending_message",
+                       message_length=len(text),
+                       backend_available=backend_available,
+                       total_messages=total_messages)
 
-        # Reset current bubble for new response
-        self.current_bubble = None
+            # Cleanup old messages if needed
+            if self._on_cleanup_messages:
+                self._on_cleanup_messages()
 
-        if backend_available:
-            self._send_to_backend(text)
-        else:
-            self._show_demo_response(text)
+            # Scroll to bottom
+            if self._on_scroll_bottom:
+                self._on_scroll_bottom(force=True)
+
+            # Reset current bubble for new response
+            self.current_bubble = None
+
+            if backend_available:
+                self._send_to_backend(text)
+            else:
+                self._show_demo_response(text)
+
+            # Record message latency
+            message_latency.observe(time.time() - start_time)
+        except MessageError as e:
+            error_counter.inc()
+            logger.warning("message_validation_failed", error=str(e))
+            raise
+        except Exception as e:
+            error_counter.inc()
+            logger.exception("message_send_failed", error=str(e))
+            raise MessageServiceError(f"Failed to send message: {e}")
 
     def _send_to_backend(self, message: str) -> None:
         """Send message to backend in background thread.

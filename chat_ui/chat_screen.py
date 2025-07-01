@@ -15,7 +15,10 @@ from chat_ui.components.chat_header import ChatHeader
 from chat_ui.components.message_bubble import MessageBubble
 from chat_ui.config import Config, Messages
 from chat_ui.logging_config import get_logger
-from chat_ui.services.message_service import MessageService
+from chat_ui.services.message_service import (
+    MessageService, MessageError, MessageTooLongError,
+    MessageRateLimitError, MessageFormatError, MessageServiceError
+)
 from chat_ui.theme import Colors, Layout, Sizes, Spacing
 from chat_ui.websocket_client import ChatWebSocketClient, ConnectionState
 
@@ -254,20 +257,42 @@ class ModernChatScreen(MDScreen):
         if not text:
             return
 
-        # Add user message bubble
-        user_bubble = MessageBubble(text, is_user=True)
-        self.messages.add_widget(user_bubble)
-        self.text_input.text = ""
+        try:
+            # Add user message bubble
+            user_bubble = MessageBubble(text, is_user=True)
+            self.messages.add_widget(user_bubble)
+            self.text_input.text = ""
 
-        # Reset message service state
-        self.message_service.reset_current_bubble()
+            # Reset message service state
+            self.message_service.reset_current_bubble()
 
-        # Delegate to message service
-        self.message_service.send_message(
-            text=text,
-            backend_available=self.backend_available,
-            total_messages=len(self.messages.children)
-        )
+            # Delegate to message service
+            self.message_service.send_message(
+                text=text,
+                backend_available=self.backend_available,
+                total_messages=len(self.messages.children)
+            )
+        except MessageTooLongError as e:
+            self._show_error_message(f"❌ {str(e)}")
+        except MessageRateLimitError as e:
+            self._show_error_message(f"⚠️ {str(e)}")
+        except MessageFormatError as e:
+            self._show_error_message(f"❌ {str(e)}")
+        except MessageServiceError as e:
+            self._show_error_message(f"❌ Service Error: {str(e)}")
+        except Exception as e:
+            logger.exception("unexpected_error", error=str(e))
+            self._show_error_message("❌ An unexpected error occurred. Please try again.")
+
+    def _show_error_message(self, error_text: str) -> None:
+        """Show error message in chat.
+        
+        Args:
+            error_text: Error message to display
+        """
+        error_bubble = MessageBubble(error_text, is_user=False)
+        self.messages.add_widget(error_bubble)
+        self._scroll_to_bottom(force=True)
 
     # UI Callback methods for MessageService
     def _create_message_bubble(self, text: str, is_user: bool = False) -> MessageBubble:

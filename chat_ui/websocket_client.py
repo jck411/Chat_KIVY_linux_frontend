@@ -13,7 +13,10 @@ from typing import Callable, Optional
 import websockets
 
 from chat_ui.config import Config
-from chat_ui.logging_config import get_logger
+from chat_ui.logging_config import (
+    get_logger, error_counter, websocket_state,
+    message_counter, message_latency
+)
 
 # Set up structured logger for this module
 logger = get_logger(__name__)
@@ -168,6 +171,7 @@ class ChatWebSocketClient:
             return
 
         self._connection_state = ConnectionState.CONNECTING
+        websocket_state.inc()  # Track state change
         logger.info("connecting_to_websocket", uri=self.uri)
 
         try:
@@ -194,6 +198,7 @@ class ChatWebSocketClient:
                 logger.info("websocket_connected", compression=False, fallback_reason=str(e))
 
             self._connection_state = ConnectionState.CONNECTED
+            websocket_state.inc()  # Track state change
             self._last_ping_time = time.time()
 
             # Start message listener
@@ -201,6 +206,8 @@ class ChatWebSocketClient:
 
         except Exception as e:
             self._connection_state = ConnectionState.FAILED
+            websocket_state.inc()  # Track state change
+            error_counter.inc()
             logger.exception("websocket_connection_failed", error=str(e), uri=self.uri)
             msg = f"Failed to connect to {self.uri}: {e}"
             raise ConnectionError(msg)
@@ -259,6 +266,7 @@ class ChatWebSocketClient:
                                      on_complete: Optional[Callable[[], None]] = None) -> str:
         """Send message using persistent connection with retry logic."""
         message_id = str(uuid.uuid4())
+        start_time = time.time()
 
         # Store message handlers
         self._message_handlers[message_id] = (on_chunk, on_complete)
@@ -278,8 +286,7 @@ class ChatWebSocketClient:
                 }
 
                 await self._websocket.send(json.dumps(message_data))
-                # Debug logging disabled for production - uncomment for debugging:
-                # logger.debug(f"📤 Message sent: {message[:50]}...")
+                message_latency.observe(time.time() - start_time)
                 return "Message sent successfully"
 
             except Exception as e:
@@ -289,9 +296,11 @@ class ChatWebSocketClient:
                     await asyncio.sleep(self.retry_delay * (2 ** attempt))
                     # Force reconnection on next attempt
                     self._connection_state = ConnectionState.DISCONNECTED
+                    websocket_state.inc()  # Track state change
                 else:
                     # Clean up handler on final failure
                     self._message_handlers.pop(message_id, None)
+                    error_counter.inc()
                     logger.exception(f"Message send failed after {self.max_retries + 1} attempts")
                     msg = f"Failed after {self.max_retries + 1} attempts: {e}"
                     raise Exception(msg)
