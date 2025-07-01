@@ -32,7 +32,7 @@ A modern, production-ready chat interface built with Kivy, optimized for Linux e
 ```
 ├── main.py                    # App entry point & configuration
 ├── chat_ui/
-│   ├── modern_chat.py        # Main UI screen & chat logic
+│   ├── streaming_chat_screen.py  # Main UI screen & streaming chat logic
 │   ├── websocket_client.py   # Backend communication layer
 │   ├── theme.py             # UI styling & Material Design colors
 │   └── config.py            # Centralized configuration management
@@ -46,7 +46,7 @@ A modern, production-ready chat interface built with Kivy, optimized for Linux e
    - Suppresses verbose logging for clean production output
    - Sets up Material Design 3 theming
 
-2. **Chat Interface** (`modern_chat.py`)
+2. **Chat Interface** (`streaming_chat_screen.py`)
    - Creates modern UI with responsive chat bubbles
    - Manages message display and user input
    - Handles both real-time and demo modes
